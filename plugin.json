@@ -1,0 +1,59 @@
+{
+  "$schema": "https://raw.githubusercontent.com/LingCore/WinShun-plugins/main/schema/plugin.schema.json",
+  "manifest": 1,
+  "id": "ra9fael.bright",
+  "name": {"zh": "屏幕亮度", "en": "Display brightness"},
+  "version": "0.1.0",
+  "description": {
+    "zh": "Ctrl+Alt+滚轮调显示器亮度（内屏 WMI、外屏 DDC/CI），Ctrl+Alt+点击开关暖色滤镜；bright 关键字按显示器逐台调节",
+    "en": "Ctrl+Alt+wheel adjusts monitor brightness (WMI for built-in panels, DDC/CI for external), Ctrl+Alt+click toggles the warm filter; the bright keyword adjusts per monitor"
+  },
+  "author": "ra9fael",
+  "homepage": "https://github.com/ra9fael/winshun-bright",
+  "license": "MIT",
+  "minWinShun": "0.22.0",
+  "permissions": ["ui", "system:settings"],
+  "runtime": {
+    "mode": "resident",
+    "program": "bright.exe",
+    "qt": "host",
+    "qtVersion": "6.12.0",
+    "sandbox": "normal",
+    "start": "eager",
+    "timeoutMs": 1500,
+    "memoryMB": 256
+  },
+  "commands": [
+    {
+      "id": "bright",
+      "keyword": ["bright", "亮度"],
+      "title": {"zh": "亮度", "en": "Brightness"},
+      "hint": {"zh": "留空列出显示器；bright 70 全部设为 70%", "en": "empty lists monitors; bright 70 sets all to 70%"},
+      "actions": [
+        {"id": "up", "title": {"zh": "+10%", "en": "+10%"}, "key": "Enter"},
+        {"id": "down", "title": {"zh": "-10%", "en": "-10%"}, "key": "Ctrl+Enter"},
+        {"id": "max", "title": {"zh": "100%", "en": "100%"}, "key": "Shift+Enter"}
+      ],
+      "ai": {
+        "description": "List monitors with their brightness and channel (WMI / DDC/CI), or set brightness when the query is a number 0-100. Actions step the selected monitor's brightness. Read-only until an action runs."
+      }
+    }
+  ],
+  "settings": [
+    {
+      "key": "percentPerStep",
+      "type": "number",
+      "title": {"zh": "每格滚轮调整", "en": "Percent per wheel notch"},
+      "hint": {"zh": "1–10，默认 5", "en": "1–10, default 5"},
+      "default": 5
+    },
+    {"key": "gestureEnabled", "type": "bool", "title": {"zh": "启用 Ctrl+Alt+滚轮手势", "en": "Enable Ctrl+Alt+wheel gesture"}, "default": true},
+    {"key": "showOverlay", "type": "bool", "title": {"zh": "显示浮层", "en": "Show overlay"}, "default": true},
+    {"key": "overlayMs", "type": "number", "title": {"zh": "浮层停留", "en": "Overlay linger"}, "hint": {"zh": "毫秒，300–3000，默认 600", "en": "ms, 300–3000, default 600"}, "default": 600},
+    {"key": "overlayAnchor", "type": "choice", "title": {"zh": "浮层九宫格锚点", "en": "Overlay anchor"}, "options": ["center", "bottom-center", "bottom-right", "bottom-left", "top-center", "top-right", "top-left", "left-center", "right-center", "monitor-under-mouse"], "default": "bottom-center"},
+    {"key": "overlayOffsetX", "type": "number", "title": {"zh": "浮层 X 偏移", "en": "Overlay X offset"}, "default": 0},
+    {"key": "overlayOffsetY", "type": "number", "title": {"zh": "浮层 Y 偏移", "en": "Overlay Y offset"}, "default": 0},
+    {"key": "warmStrength", "type": "number", "title": {"zh": "暖色滤镜强度", "en": "Warm filter strength"}, "hint": {"zh": "0–100，0 关闭；Ctrl+Alt+点击在开/关间切换", "en": "0–100, 0 disables; Ctrl+Alt+click toggles it"}, "default": 0},
+    {"key": "warmRemember", "type": "bool", "title": {"zh": "记住暖色滤镜状态", "en": "Remember warm filter"}, "default": false}
+  ]
+}
