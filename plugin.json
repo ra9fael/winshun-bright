@@ -16,8 +16,6 @@
   "runtime": {
     "mode": "resident",
     "program": "bright.exe",
-    "qt": "host",
-    "qtVersion": "6.12.0",
     "sandbox": "normal",
     "start": "eager",
     "timeoutMs": 1500,

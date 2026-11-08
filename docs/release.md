@@ -2,14 +2,15 @@
 
 ## 构建
 
-参照 bosskey/volume 架构：`bright.exe` 薄引导器 + `BrightApp.dll`（QML 浮层，链接宿主共享 Qt 运行时，`WS_QT_DIR` 指向 D:\tools\Qt\6.12.0\msvc2022_64），Ninja Release。
+参照 volume 架构：单个 `bright.exe`（Win32 浮层 + 低级鼠标钩子 + 工作线程，MinGW 静态链接 C++ 运行时），无 Qt 依赖、无附带 DLL。Ninja Release。
 
 ```powershell
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
+ctest --test-dir build
 ```
 
-产物落在仓库根（与 plugin.json 同目录）。内存上限 `memoryMB: 256`——浮层走宿主渲染路径，双屏 D3D11 需约 210MB，勿再下调。
+产物落在仓库根（与 plugin.json 同目录）。MinGW（GNU 分支）静态链接 C++ 运行时；MSVC 亦可构建。内存上限 `memoryMB: 256`。打包前确认 `brb_tests` 全绿。
 
 ## 打包（.wsplugin）
 
@@ -17,7 +18,6 @@ cmake --build build
 2. `dist/ra9fael.bright-<ver>.wsplugin` = zip，包含且仅包含：
    - `plugin.json`
    - `bright.exe`
-   - `BrightApp.dll`
    - `README.md`
    - `LICENSE`
 3. 计算 SHA-256：`Get-FileHash dist\ra9fael.bright-<ver>.wsplugin`

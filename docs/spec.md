@@ -1,6 +1,6 @@
 # ra9fael.bright 功能规格（v0.1.0）
 
-状态：设计完成，代码未实现。协议与清单字段以 WinShun 0.22.0 插件文档为准（resident JSON-RPC over stdio）。
+状态：v0.1.0 已实现，并已在真实宿主实测（实测状态见第 12 节）。协议与清单字段以 WinShun 0.22.0 插件文档为准（resident JSON-RPC over stdio）。
 
 ## 1 目标
 
@@ -75,3 +75,32 @@
 
 - v0.1：上述全部（DDC + WMI + 滤镜 + 手势 + 浮层）
 - v0.2 候选：HDR 开关、按鼠标所在屏幕独立调节、系统夜灯状态只读检测
+
+## 12 实现记录（v0.1.0 回填）
+
+与上文规格的偏差，以及实施后的实测状态。
+
+### 架构
+
+- 单进程单文件 `bright.exe`（与 volume 同构），无 `BrightApp.dll`、不链接 Qt；`plugin.json` 因此删去 `qt` / `qtVersion`。浮层是 Win32 非激活窗口。
+- 线程：协议线程（query/action，自己持有一个后端实例）、钩子线程（只做判定与投递）、工作线程（WMI/DDC/gamma + 浮层 + 800ms 回读定时器）。
+- 热插拔：工作线程持有一个从不显示的顶层窗口接收 `WM_DISPLAYCHANGE`，重建列表与 DDC 句柄，并重新套用暖色 ramp。
+- 纯逻辑在 `src/bright_logic.{h,cpp}`（手势判定、滚轮累计、百分比/VCP 换算、暖色 LUT、显示器列表归一化、`bright` 查询解析），不引 OS 头文件，可单测。
+- 偏差：第 6 节写的「会话切换（WTS 事件）时恢复」未实现——未注册 WTS 会话通知。进程退出恢复已覆盖主要场景；锁屏/切换期间 ramp 的实际行为列入 `docs/tests.md` 第 3 节 E2E 待验，若实测发现解锁后滤镜丢失，再补 WTS 监听。
+
+### 实测
+
+- 单元测试：`brb_tests` 52 条全绿（`cmake --build build && ctest`）。
+- 协议往返：`initialize → query(留空) → query(70) → query(abc) → query(105) → action(up) → shutdown` 在本机实跑，返回结构与文案符合规格；不可调显示器返回 `外屏 · 不支持`，`bright 70` / `105` 返回 `no-display` 提示行，动作返回 `notify`。
+- 状态持久化：`state.json` 读写路径已接通（`WS_DATA_DIR`），未在真机上验证重启恢复。
+- 真实宿主（2026-11-08，本机单屏不可调）：安装到 `%LOCALAPPDATA%\WinShun\plugins\ra9fael.bright\` 并在 `WinShun.ini` 写入 `[Plugin.ra9fael.bright]` 启用与权限确认后，宿主热加载成功（plugins.log 记录启动，无超时/错误/退出行）。`WinShun.exe --query "bright"` 打开输入框回车执行：结果列出「Generic PnP Monitor / 外屏 · 不支持 · \\.\DISPLAY65」（屏幕亮度标签），与规格第 10 节失败矩阵一致。常驻进程 12.5 MB（限额 256 MB），全程无重启。
+
+### 未验证（发布阻塞项）
+
+- 本机测试环境无可调显示器：既无 WMI 亮度类（`WmiMonitorBrightness` 空集），外屏也不响应 DDC VCP 0x10。因此以下只在代码层面成立，**没有实测**：
+  - 内屏 WMI 读写、外屏 DDC 读写与 OSD 出现；
+  - VCP max≠100 的换算与 800ms 回读校准（±2%）；
+  - 暖色滤镜的视觉效果与锁屏/解锁恢复；
+  - Ctrl+Alt+滚轮与 Ctrl 单独滚轮（volume）互不抢占；
+  - 双屏拔插后的列表重建。
+- 这些需要在 Windows 11 双屏实机按 `docs/tests.md` 第 3 节逐条勾选后才能宣布 v0.1.0 可发布。
