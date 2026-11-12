@@ -333,13 +333,13 @@ void Overlay::paint()
 
     // Small label at the top.
     ::SetTextColor(dc, RGB(198, 198, 208));
-    HFONT small = makeFont(13, FW_NORMAL);
-    HFONT old = static_cast<HFONT>(::SelectObject(dc, small));
+    HFONT smallFont = makeFont(13, FW_NORMAL);
+    HFONT old = static_cast<HFONT>(::SelectObject(dc, smallFont));
     RECT labelRect { rc.left + 12, rc.top + 8, rc.right - 12, rc.top + 26 };
     ::DrawTextW(dc, m_label.c_str(), -1, &labelRect,
         DT_CENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     ::SelectObject(dc, old);
-    ::DeleteObject(small);
+    ::DeleteObject(smallFont);
 
     // Big percentage.
     ::SetTextColor(dc, RGB(245, 245, 248));
