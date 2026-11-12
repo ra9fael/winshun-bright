@@ -19,7 +19,34 @@ std::string trimText(const std::string& s)
     return s.substr(a, b - a);
 }
 
+std::string lowerText(const std::string& s)
+{
+    std::string out = s;
+    for (char& c : out) {
+        if (c >= 'A' && c <= 'Z')
+            c = static_cast<char>(c - 'A' + 'a');
+    }
+    return out;
+}
+
 } // namespace
+
+long long Rect::distanceSquared(int x, int y) const
+{
+    if (empty())
+        return -1;
+    long long dx = 0;
+    if (x < left)
+        dx = left - x;
+    else if (x >= right)
+        dx = x - (right - 1);
+    long long dy = 0;
+    if (y < top)
+        dy = top - y;
+    else if (y >= bottom)
+        dy = y - (bottom - 1);
+    return dx * dx + dy * dy;
+}
 
 std::vector<MonitorInfo> normalizeMonitors(std::vector<MonitorInfo> in)
 {
@@ -39,33 +66,144 @@ std::vector<MonitorInfo> normalizeMonitors(std::vector<MonitorInfo> in)
     return out;
 }
 
-GestureDecision decideGesture(const GestureEvent& e)
+int monitorIndexAtPoint(const std::vector<MonitorInfo>& monitors, int x, int y, bool adjustableOnly)
 {
+    int inside = -1;
+    int nearest = -1;
+    long long nearestDistance = 0;
+    for (std::size_t i = 0; i < monitors.size(); ++i) {
+        const MonitorInfo& m = monitors[i];
+        if (adjustableOnly && !m.adjustable)
+            continue;
+        if (m.bounds.contains(x, y)) {
+            // Overlapping mirrors: the first region wins, the rest were dropped
+            // by normalizeMonitors anyway.
+            inside = static_cast<int>(i);
+            break;
+        }
+        const long long distance = m.bounds.distanceSquared(x, y);
+        if (distance >= 0 && (nearest < 0 || distance < nearestDistance)) {
+            nearest = static_cast<int>(i);
+            nearestDistance = distance;
+        }
+    }
+    return inside >= 0 ? inside : nearest;
+}
+
+GestureDecision decideGesture(const GestureEvent& e, const GestureModifiers& chord)
+{
+    // A real physical left click is also the stop signal for the persistent
+    // easter egg. It is explicitly non-swallowing; normal click behaviour is
+    // preserved even when no brightness chord is held.
+    bool stopEgg = false;
+    if (e.leftDown && !e.injected)
+        stopEgg = true;
     // Simulated input is never ours: swallowing it would loop the gesture.
     if (e.injected)
         return GestureDecision::pass();
-    // Exactly Ctrl+Alt. Ctrl-only belongs to the volume plugin; Alt-only,
-    // Shift and Win combos belong to the system.
-    if (!e.ctrl || !e.alt || e.shift || e.win)
-        return GestureDecision::pass();
+    // The configured chord exactly; Ctrl-only (the volume plugin's gesture),
+    // Alt-only, Shift/Win combos and any extra modifier pass through.
+    if (!chord.matches(e.ctrl, e.alt, e.shift, e.win)) {
+        GestureDecision d = GestureDecision::pass();
+        d.stopEgg = stopEgg;
+        d.x = e.x;
+        d.y = e.y;
+        return d;
+    }
 
     if (e.wheel) {
-        if (e.wheelDelta == 0)
-            return GestureDecision::pass();
+        if (e.wheelDelta == 0) {
+            GestureDecision d = GestureDecision::pass();
+            d.stopEgg = stopEgg;
+            d.x = e.x;
+            d.y = e.y;
+            return d;
+        }
         GestureDecision d;
+        d.stopEgg = stopEgg;
         d.swallow = true;
         d.kind = GestureKind::Wheel;
         d.steps = e.wheelDelta > 0 ? 1 : -1;
+        d.x = e.x;
+        d.y = e.y;
+        d.eventTimeMs = e.eventTimeMs;
         return d;
     }
     if (e.leftDown) {
         GestureDecision d;
+        d.stopEgg = stopEgg;
         d.swallow = true;
         d.kind = GestureKind::Click;
+        d.x = e.x;
+        d.y = e.y;
         return d;
     }
     return GestureDecision::pass();
 }
+
+GestureModifiers GestureModifiers::parse(const std::string& text)
+{
+    const std::string trimmed = trimText(text);
+    if (trimmed.empty())
+        return ctrlAlt();
+    GestureModifiers out;
+    out.ctrl = false;
+    out.alt = false;
+    out.shift = false;
+    out.win = false;
+    bool any = false;
+    std::size_t start = 0;
+    while (start <= trimmed.size()) {
+        const std::size_t plus = trimmed.find('+', start);
+        const std::string part = lowerText(trimText(trimmed.substr(start,
+            plus == std::string::npos ? std::string::npos : plus - start)));
+        if (part == "ctrl" || part == "control")
+            out.ctrl = true;
+        else if (part == "alt")
+            out.alt = true;
+        else if (part == "shift")
+            out.shift = true;
+        else if (part == "win" || part == "meta")
+            out.win = true;
+        else if (!part.empty())
+            return ctrlAlt(); // an unknown name: keep the default rather than a weird chord
+        any = any || !part.empty();
+        if (plus == std::string::npos)
+            break;
+        start = plus + 1;
+    }
+    // A chord with no modifier would swallow every plain wheel and click.
+    if (!any || (!out.ctrl && !out.alt && !out.shift && !out.win))
+        return ctrlAlt();
+    return out;
+}
+
+std::string GestureModifiers::text() const
+{
+    std::string out;
+    const auto add = [&out](const char* name) {
+        if (!out.empty())
+            out += '+';
+        out += name;
+    };
+    if (win)
+        add("win");
+    if (ctrl)
+        add("ctrl");
+    if (alt)
+        add("alt");
+    if (shift)
+        add("shift");
+    return out;
+}
+
+bool GestureModifiers::matches(bool ctrlDown, bool altDown, bool shiftDown, bool winDown) const
+{
+    if (!ctrl && !alt && !shift && !win)
+        return false; // an empty chord is not a gesture
+    return ctrl == ctrlDown && alt == altDown && shift == shiftDown && win == winDown;
+}
+
 
 int WheelAccumulator::add(int delta)
 {
@@ -102,6 +240,68 @@ int steppedPercent(int current, int steps, int percentPerStep)
     if (percentPerStep > 10)
         percentPerStep = 10;
     return clampPercent(current + steps * percentPerStep);
+}
+
+int dimAlpha(int percent, int maxDark)
+{
+    // 90% black is the hard ceiling: more than that and the user cannot find
+    // the pointer any more.
+    if (maxDark < 0)
+        maxDark = 0;
+    if (maxDark > 90)
+        maxDark = 90;
+    const int p = clampPercent(percent);
+    if (p >= 100)
+        return 0; // fully bright: no layer at all
+    const int peak = static_cast<int>(std::lround(maxDark * 255.0 / 100.0));
+    // 0% brightness paints the whole cap, 100% paints nothing.
+    return static_cast<int>(std::lround(peak * (100 - p) / 100.0));
+}
+
+bool isNight(int minutesOfDay)
+{
+    if (minutesOfDay < 0)
+        minutesOfDay += 1440;
+    minutesOfDay %= 1440;
+    constexpr int kNightStart = 22 * 60; // 22:00
+    constexpr int kNightEnd = 6 * 60;    // 06:00
+    return minutesOfDay >= kNightStart || minutesOfDay < kNightEnd;
+}
+
+void EggTracker::reset()
+{
+    m_startedAt = -1;
+    m_lastUpAt = -1;
+}
+
+int EggTracker::elapsedMs(long long nowMs) const
+{
+    if (m_startedAt < 0)
+        return 0;
+    return static_cast<int>(nowMs - m_startedAt);
+}
+
+bool EggTracker::feed(int steps, const Context& context, long long nowMs)
+{
+    // Any sustained upward scroll on the same monitor may reveal the egg.
+    const bool eligible = context.eggEnabled && context.sameMonitor && steps > 0;
+    if (!eligible) {
+        reset();
+        return false;
+    }
+    if (m_startedAt >= 0 && nowMs - m_lastUpAt > kEggGapMs) {
+        // A pause longer than the gap is not "continuous" any more; this step
+        // starts a new run rather than continuing the old one.
+        reset();
+    }
+    if (m_startedAt < 0)
+        m_startedAt = nowMs;
+    m_lastUpAt = nowMs;
+    if (nowMs - m_startedAt >= kEggUpCountMs) {
+        reset(); // consumed: the next one needs a fresh 10 seconds
+        return true;
+    }
+    return false;
 }
 
 int vcpToPercent(int value, int max)

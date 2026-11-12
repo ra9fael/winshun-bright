@@ -10,6 +10,7 @@
 #include <oleauto.h>
 #include <physicalmonitorenumerationapi.h>
 #include <wbemidl.h>
+#include <winuser.h>
 
 #include <algorithm>
 #include <map>
@@ -295,6 +296,7 @@ struct GdiMonitor {
     std::wstring device;
     std::wstring deviceId;
     std::wstring deviceString;
+    RECT rcMonitor {};
 };
 
 BOOL CALLBACK enumMonitorProc(HMONITOR hmon, HDC, LPRECT, LPARAM lp)
@@ -307,6 +309,7 @@ BOOL CALLBACK enumMonitorProc(HMONITOR hmon, HDC, LPRECT, LPARAM lp)
     GdiMonitor g;
     g.hmon = hmon;
     g.device = mi.szDevice;
+    g.rcMonitor = mi.rcMonitor;
     DISPLAY_DEVICEW dd {};
     dd.cb = sizeof dd;
     if (::EnumDisplayDevicesW(mi.szDevice, 0, &dd, 0)) {
@@ -320,6 +323,8 @@ BOOL CALLBACK enumMonitorProc(HMONITOR hmon, HDC, LPRECT, LPARAM lp)
 struct DdcBinding {
     std::wstring id;
     std::vector<PHYSICAL_MONITOR> phys;
+    std::size_t activeIndex = 0; // the physical node that answered VCP 0x10
+    bool bound = false; // the panel answered VCP 0x10 at least once
 };
 
 struct GammaTarget {
@@ -357,6 +362,19 @@ public:
 
     void invalidate() override { m_dirty = true; }
 
+    const std::wstring& lastError() const override { return m_lastError; }
+
+    Rect monitorBounds(const std::wstring& id) override
+    {
+        if (m_dirty)
+            rebuild();
+        for (const MonitorInfo& m : m_monitors) {
+            if (m.id == id)
+                return m.bounds;
+        }
+        return {};
+    }
+
     const std::vector<MonitorInfo>& monitors() override
     {
         if (m_dirty)
@@ -381,8 +399,8 @@ public:
         for (MonitorInfo& m : m_monitors) {
             if (m.channel != Channel::Ddc)
                 continue;
-            HANDLE h = ddcHandle(m.id);
-            if (!h)
+            HANDLE h = nullptr;
+            if (!ddcHandle(m, h))
                 continue;
             DWORD current = 0;
             DWORD maximum = 0;
@@ -398,25 +416,32 @@ public:
     {
         if (m_dirty)
             rebuild();
+        m_lastError.clear();
         for (MonitorInfo& m : m_monitors) {
             if (m.id != id)
                 continue;
             if (m.channel == Channel::Wmi) {
                 const std::wstring instance = instanceFor(id);
-                if (instance.empty())
+                if (instance.empty()) {
+                    m_lastError = L"no-handle";
                     return std::nullopt;
+                }
                 for (const WmiPanel& p : m_wmi.panels()) {
                     if (p.instance == instance) {
                         m.percent = p.current;
                         break;
                     }
                 }
+                if (m.percent < 0)
+                    m_lastError = L"wmi-read";
                 return m.percent >= 0 ? std::optional<int>(m.percent) : std::nullopt;
             }
             if (m.channel == Channel::Ddc) {
-                HANDLE h = ddcHandle(id);
-                if (!h)
+                HANDLE h = nullptr;
+                if (!ddcHandle(m, h)) {
+                    m_lastError = L"no-handle";
                     return std::nullopt;
+                }
                 DWORD current = 0;
                 DWORD maximum = 0;
                 if (::GetVCPFeatureAndVCPFeatureReply(h, 0x10, nullptr, &current, &maximum)
@@ -425,10 +450,13 @@ public:
                     m.percent = vcpToPercent(static_cast<int>(current), static_cast<int>(maximum));
                     return m.percent;
                 }
+                m_lastError = L"vcp-read";
                 return std::nullopt;
             }
+            m_lastError = L"unsupported";
             return std::nullopt;
         }
+        m_lastError = L"unknown-monitor";
         return std::nullopt;
     }
 
@@ -436,32 +464,41 @@ public:
     {
         if (m_dirty)
             rebuild();
+        m_lastError.clear();
         const int target = clampPercent(percent);
         for (MonitorInfo& m : m_monitors) {
             if (m.id != id)
                 continue;
             if (m.channel == Channel::Wmi) {
-                if (!m_wmi.setBrightness(instanceFor(id), target))
+                if (!m_wmi.setBrightness(instanceFor(id), target)) {
+                    m_lastError = L"wmi-write";
                     return false;
+                }
                 m.percent = target;
                 applied = target;
                 return true;
             }
             if (m.channel == Channel::Ddc) {
-                HANDLE h = ddcHandle(id);
-                if (!h)
+                HANDLE h = nullptr;
+                if (!ddcHandle(m, h)) {
+                    m_lastError = L"no-handle";
                     return false;
+                }
                 if (!::SetVCPFeature(h, 0x10,
-                        static_cast<DWORD>(percentToVcp(target, m.vcpMax))))
+                        static_cast<DWORD>(percentToVcp(target, m.vcpMax)))) {
+                    m_lastError = L"vcp-write";
                     return false;
+                }
                 // DDC settles tens of milliseconds later; the worker's
                 // read-back timer calibrates the overlay.
                 m.percent = target;
                 applied = target;
                 return true;
             }
+            m_lastError = L"unsupported";
             return false;
         }
+        m_lastError = L"unknown-monitor";
         return false;
     }
 
@@ -564,6 +601,7 @@ private:
 
             MonitorInfo info;
             info.id = g.device;
+            info.bounds = Rect { g.rcMonitor.left, g.rcMonitor.top, g.rcMonitor.right, g.rcMonitor.bottom };
             info.name = edidName(g.deviceId);
             if (info.name.empty() && panel && !panel->name.empty())
                 info.name = panel->name;
@@ -600,38 +638,94 @@ private:
         if (!::GetPhysicalMonitorsFromHMONITOR(g.hmon, count, phys.data()))
             return;
 
+        // A DDC read right after boot, out of standby, or through a dock/KVM
+        // often fails once and answers on the next try. Without the retry the
+        // panel stayed "unsupported" until the next display change, which is
+        // why a multi-monitor setup could end up with a single adjustable
+        // display.
         for (DWORD i = 0; i < count; ++i) {
-            DWORD current = 0;
-            DWORD maximum = 0;
-            if (::GetVCPFeatureAndVCPFeatureReply(phys[i].hPhysicalMonitor, 0x10,
-                    nullptr, &current, &maximum)
-                && maximum > 0) {
-                info.channel = Channel::Ddc;
-                info.vcpMax = static_cast<int>(maximum);
-                info.percent = vcpToPercent(static_cast<int>(current), static_cast<int>(maximum));
-                info.adjustable = true;
-                if (info.name.empty())
-                    info.name = phys[i].szPhysicalMonitorDescription;
-                DdcBinding binding;
-                binding.id = g.device;
-                binding.phys = std::move(phys);
-                m_ddc.push_back(std::move(binding));
-                return;
+            for (int attempt = 0; attempt < 3; ++attempt) {
+                if (attempt > 0)
+                    ::Sleep(40);
+                DWORD current = 0;
+                DWORD maximum = 0;
+                if (::GetVCPFeatureAndVCPFeatureReply(phys[i].hPhysicalMonitor, 0x10,
+                        nullptr, &current, &maximum)
+                    && maximum > 0) {
+                    info.channel = Channel::Ddc;
+                    info.vcpMax = static_cast<int>(maximum);
+                    info.percent = vcpToPercent(static_cast<int>(current), static_cast<int>(maximum));
+                    info.adjustable = true;
+                    if (info.name.empty())
+                        info.name = phys[i].szPhysicalMonitorDescription;
+                    DdcBinding binding;
+                    binding.id = g.device;
+                    binding.phys = std::move(phys);
+                    binding.activeIndex = static_cast<std::size_t>(i);
+                    binding.bound = true;
+                    m_ddc.push_back(std::move(binding));
+                    return;
+                }
             }
         }
-        // No physical monitor of this HMONITOR answered VCP 0x10 (a dock, a
-        // converter or a KVM in between): release the handles and stay
-        // unadjustable.
-        ::DestroyPhysicalMonitors(count, phys.data());
+
+        // No physical monitor of this HMONITOR answered VCP 0x10 yet. Keep the
+        // handles and the channel: the first gesture retries, so a panel that
+        // was asleep at startup is not written off for the whole session.
+        info.channel = Channel::Ddc;
+        info.adjustable = false;
+        info.percent = -1;
+        if (info.name.empty() && !phys.empty())
+            info.name = phys[0].szPhysicalMonitorDescription;
+        DdcBinding binding;
+        binding.id = g.device;
+        binding.phys = std::move(phys);
+        binding.bound = false;
+        m_ddc.push_back(std::move(binding));
     }
 
-    HANDLE ddcHandle(const std::wstring& id) const
+    // The DDC handle for one monitor. An unbound binding is re-probed here (on
+    // the worker thread) so the panel becomes adjustable as soon as it
+    // answers, without waiting for a display change.
+    //
+    // PHYSICAL_MONITOR::hPhysicalMonitor is NOT a pointer: several drivers
+    // hand out small tokens, and the first physical monitor of a session can
+    // be token 0. A null check would therefore reject a perfectly good
+    // handle, which showed up as "no-handle" on the first enumerated display.
+    // Success is decided by the VCP call, never by the handle's value.
+    bool ddcHandle(MonitorInfo& info, HANDLE& out)
     {
-        for (const DdcBinding& b : m_ddc) {
-            if (b.id == id && !b.phys.empty())
-                return b.phys[0].hPhysicalMonitor;
+        for (DdcBinding& b : m_ddc) {
+            if (b.id != info.id || b.phys.empty())
+                continue;
+            if (b.activeIndex >= b.phys.size())
+                b.activeIndex = 0;
+            if (!b.bound) {
+                // A single HMONITOR can expose several physical nodes through
+                // a dock/KVM. The first node is often a stale or virtual one;
+                // probe every node before reporting no-handle.
+                for (std::size_t i = 0; i < b.phys.size(); ++i) {
+                    const std::size_t index = (b.activeIndex + i) % b.phys.size();
+                    DWORD current = 0;
+                    DWORD maximum = 0;
+                    if (::GetVCPFeatureAndVCPFeatureReply(
+                            b.phys[index].hPhysicalMonitor, 0x10, nullptr,
+                            &current, &maximum) && maximum > 0) {
+                        b.activeIndex = index;
+                        b.bound = true;
+                        info.vcpMax = static_cast<int>(maximum);
+                        info.percent = vcpToPercent(static_cast<int>(current), static_cast<int>(maximum));
+                        info.adjustable = true;
+                        out = b.phys[index].hPhysicalMonitor;
+                        return true;
+                    }
+                }
+                return false; // all physical nodes still asleep or unsupported
+            }
+            out = b.phys[b.activeIndex].hPhysicalMonitor;
+            return true;
         }
-        return nullptr;
+        return false;
     }
 
     void destroyDdc()
@@ -684,11 +778,31 @@ private:
     bool m_coInit = false;
     bool m_warmActive = false;
     int m_warmStrength = 0;
+    std::wstring m_lastError;
 };
 
 std::unique_ptr<IDisplayBackend> createBackend()
 {
     return std::make_unique<DisplayBackend>();
+}
+
+bool isRemoteSession()
+{
+    // SM_REMOTESESSION answers for the session this process runs in: true for
+    // mstsc/RDP and for a console session taken over by a remote tool.
+    if (::GetSystemMetrics(SM_REMOTESESSION) != 0)
+        return true;
+    // A session bridged by software that does not set that flag still lives in
+    // a window station other than WinSta0; the name is the cheapest read.
+    const HWINSTA station = ::GetProcessWindowStation();
+    if (!station)
+        return false;
+    wchar_t name[128] = {};
+    DWORD needed = 0;
+    if (!::GetUserObjectInformationW(station, UOI_NAME, name, sizeof name, &needed))
+        return false;
+    const std::wstring stationName(name);
+    return !stationName.empty() && stationName != L"WinSta0";
 }
 
 } // namespace br

@@ -42,6 +42,14 @@ public:
     // target for DDC, whose read-back settles later). False on failure.
     virtual bool setPercent(const std::wstring& id, int percent, int& applied) = 0;
 
+    // Why the last setPercent/readPercent failed, for the overlay and the log;
+    // empty when the last call worked. Stable keys: "no-handle", "vcp-read",
+    // "vcp-write", "wmi-write", "unknown-monitor".
+    virtual const std::wstring& lastError() const = 0;
+
+    // Display area of one monitor (virtual-screen pixels), empty when unknown.
+    virtual Rect monitorBounds(const std::wstring& id) = 0;
+
     // Applies the warm filter at `strength` (0 restores the original ramps).
     virtual bool setWarm(int strength) = 0;
     virtual void restoreWarm() = 0;
@@ -50,5 +58,11 @@ public:
 
 // The real backend. One instance per thread; call init() on that thread.
 std::unique_ptr<IDisplayBackend> createBackend();
+
+// True in a Remote Desktop session (mstsc, RDP, and most remote-control
+// stacks). The session sees a virtual display instead of the physical panels,
+// so WMI brightness, DDC/CI and the gamma ramp do not reach the real monitor:
+// the plugin says so instead of pretending the hardware is unsupported.
+bool isRemoteSession();
 
 } // namespace br

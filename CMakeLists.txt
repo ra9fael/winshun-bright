@@ -8,19 +8,31 @@ if(NOT WIN32)
     message(FATAL_ERROR "WinShunBright builds on Windows only")
 endif()
 
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
+
 add_executable(WinShunBright
     src/main.cpp
     src/bright_logic.cpp
     src/display_controller.cpp
     src/bright_worker.cpp
+    src/dim_layer.cpp
+    src/egg_effects.cpp
+    src/hotkey_thread.cpp
     src/mouse_hook.cpp
     src/overlay.cpp
+    bright.rc
 )
+if(MSVC)
+    set_target_properties(WinShunBright PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 target_include_directories(WinShunBright PRIVATE src)
 target_compile_definitions(WinShunBright PRIVATE
     UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN CRT_SECURE_NO_WARNINGS)
 target_link_libraries(WinShunBright PRIVATE
-    user32 gdi32 ole32 oleaut32 uuid wbemuuid dxva2 advapi32)
+    user32 gdi32 ole32 oleaut32 uuid wbemuuid dxva2 advapi32 d2d1 dwrite windowscodecs)
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     # A published plugin must run on machines without a MinGW toolchain:
     # link libstdc++/libgcc/winpthread into bright.exe.
@@ -41,10 +53,12 @@ foreach(cfg ${CMAKE_CONFIGURATION_TYPES})
 endforeach()
 
 enable_testing()
+
 add_executable(brb_tests
     tests/test_main.cpp
     tests/test_bright_logic.cpp
     src/bright_logic.cpp
+    src/egg_effects.cpp
 )
 target_include_directories(brb_tests PRIVATE src tests)
 target_compile_definitions(brb_tests PRIVATE

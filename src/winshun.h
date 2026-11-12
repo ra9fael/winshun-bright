@@ -868,6 +868,14 @@ public:
     // "ui": themeSetting, corners, uiStyle, uiSize, transparency, renderer, and
     // nativeLook (the style's colours "#AARRGGBB" and radii; docs/plugins.md, 外观)
     const Json& appearance() const { return m_appearance; }
+    // initialize.capabilities: what this host offers a plugin. `hostHotkeys`
+    // (0.22.0+) means register_hotkeys replaces this plugin's global keys and
+    // a press arrives as the `hotkey` notification.
+    const Json& capabilities() const { return m_capabilities; }
+    bool hostHotkeys() const
+    {
+        return m_capabilities.isObject() && m_capabilities["hostHotkeys"].toBool(false);
+    }
     const std::string& pluginDir() const { return m_pluginDir; }
     const std::string& dataDir() const { return m_dataDir; }
     bool chinese() const { return m_locale != "en"; }
@@ -960,6 +968,10 @@ protected:
     // about 2 seconds for the answer.
     virtual void shuttingDown() {}
     virtual void cancel(long long queryId) { (void)queryId; }
+    // One of this plugin's host-registered hotkeys was pressed (the `hotkey`
+    // notification, docs/plugins.md 快捷键): `key` is the spelling that was
+    // registered ("Ctrl+Alt+F1"). Only sent when capabilities().hostHotkeys.
+    virtual void hotkey(const std::string& key) { (void)key; }
     virtual std::string name() const { return "plugin"; }
     // A query's whole answer, when `rerun` (seconds) or `cache` (seconds)
     // are wanted too: override queryResult instead of query.
@@ -1034,6 +1046,7 @@ private:
             m_locale = params["locale"].toString();
             m_theme = params["theme"].toString();
             m_appearance = params["appearance"];
+            m_capabilities = params["capabilities"];
             m_pluginDir = params["pluginDir"].toString();
             m_dataDir = params["dataDir"].toString();
             answer(Json::Object {{"protocolVersion", "1"}, {"name", name()}});
@@ -1077,6 +1090,8 @@ private:
         } else if (method == "settingsChanged") {
             m_settings = params["settings"];
             settingsChanged(m_settings);
+        } else if (method == "hotkey") {
+            hotkey(params["key"].toString());
         } else if (method == "appearance") {
             if (params["locale"].isString())
                 m_locale = params["locale"].toString();
@@ -1104,6 +1119,7 @@ private:
     std::string m_locale = "zh";
     std::string m_theme = "light";
     Json m_appearance;
+    Json m_capabilities;
     std::string m_pluginDir;
     std::string m_dataDir;
 };

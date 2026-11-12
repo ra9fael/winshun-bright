@@ -19,10 +19,18 @@ namespace br {
 
 // One queued action for the worker.
 struct BrightOp {
-    enum class Kind { None, Wheel, ToggleWarm, SetAll, BlockedReason };
+    enum class Kind { None, Wheel, ToggleWarm, SetAll, BlockedReason, StopEgg, PlayEgg };
+    // Which displays the op changes. SetAll is always All; a gesture carries
+    // the pointer position so the worker picks the panel itself (the target
+    // list lives on the worker thread).
+    enum class Target { UnderMouse, All };
     Kind kind = Kind::None;
     int steps = 0;      // Wheel
     int percent = 0;    // SetAll (already clamped by the caller)
+    Target target = Target::UnderMouse;
+    int x = 0; // pointer at the gesture, virtual-screen pixels
+    int y = 0;
+    long long eventTimeMs = 0; // original hook time; avoids DDC queue-delay drift
     std::string reason; // BlockedReason: stable key
 };
 
@@ -31,6 +39,7 @@ public:
     // Runs on the worker thread when the warm filter was turned on or off by
     // a gesture; the plugin persists it when warmRemember is set.
     using WarmSink = std::function<void(bool on)>;
+    using EggDiscoveredSink = std::function<void()>;
 
     BrightWorker() = default;
     ~BrightWorker() { stop(); }
@@ -40,8 +49,10 @@ public:
     bool start();
     void stop();
     bool running() const { return m_running.load(); }
+    bool eggRunning() const { return m_eggRunningSnapshot.load(); }
 
     void setWarmSink(WarmSink sink);
+    void setEggDiscoveredSink(EggDiscoveredSink sink);
 
     // Thread-safe; the op is heap-copied and delivered via thread message.
     void post(BrightOp op);
@@ -58,6 +69,7 @@ private:
 
     std::thread m_thread;
     std::atomic<bool> m_running { false };
+    std::atomic<bool> m_eggRunningSnapshot { false };
     DWORD m_threadId = 0;
     std::mutex m_mutex;
     Settings m_settings;
@@ -65,6 +77,7 @@ private:
     bool m_warmDirty = false;
     bool m_displaysDirty = false;
     WarmSink m_warmSink;
+    EggDiscoveredSink m_eggDiscoveredSink;
     // Handshake so the first post() cannot race the worker's message queue.
     std::mutex m_startMutex;
     std::condition_variable m_startCv;

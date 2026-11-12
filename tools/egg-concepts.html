@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bright · 全屏彩蛋动效（与插件同源）</title>
+<style>
+:root{color-scheme:dark;--panel:rgba(19,27,43,.9);--line:rgba(187,211,255,.16);--text:#f5f7ff;--muted:#aeb9cc;--cyan:#86e8ff;--gold:#ffd867}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 50% 0%,#243654 0,#121a2a 42%,#080c14 100%);color:var(--text);font:14px/1.5 "Microsoft YaHei UI",system-ui,sans-serif}
+.shell{max-width:1500px;margin:auto;padding:22px;display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px}
+.head{grid-column:1/-1;display:flex;align-items:end;justify-content:space-between;gap:18px}
+.head h1{margin:0;font-size:22px}.head p{margin:5px 0 0;color:var(--muted);max-width:900px}
+.stage{position:relative;height:min(70vh,800px);min-height:400px;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#070b12;box-shadow:0 22px 70px #0008}
+.wall{position:absolute;inset:0;background:linear-gradient(130deg,#0f2135,#131428 42%,#26172e)}
+.wall:before{content:"";position:absolute;inset:-20%;background:radial-gradient(ellipse at 22% 35%,#33a9cb22,transparent 27%),radial-gradient(ellipse at 80% 72%,#e35b9524,transparent 32%)}
+.wall:after{content:"";position:absolute;inset:0;background-image:radial-gradient(#d8ecff56 .7px,transparent .9px);background-size:31px 31px;opacity:.25}
+.tag{position:absolute;left:14px;top:12px;padding:6px 10px;border:1px solid #ffffff24;border-radius:999px;background:#070b12aa;font-size:12px;z-index:3}
+.tag b{color:#8deaff}.stage canvas{position:absolute;inset:0;width:100%;height:100%}
+.cap{display:flex;justify-content:space-between;gap:10px;margin:9px 3px;color:var(--muted);font-size:12px}
+.cap b{color:#e8f5ff}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 18px 50px #0004}
+.panel h2{font-size:14px;margin:0 0 10px}
+.choices{display:grid;gap:6px}
+.choice{width:100%;text-align:left;background:#ffffff08;border:1px solid transparent;color:var(--text);padding:9px 10px;border-radius:10px;cursor:pointer;font:inherit}
+.choice:hover{background:#ffffff12}.choice.active{border-color:#8ce7ff77;background:linear-gradient(100deg,#54cceb25,#e17da31c)}
+.choice strong{display:block;font-size:12.5px}.choice small{display:block;color:var(--muted);font-size:11px}
+.hr{height:1px;background:var(--line);margin:13px 0}
+.row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:9px 0 2px}
+.row label{font-size:12px}.val{font-variant-numeric:tabular-nums;color:var(--gold);font-size:12px}
+input[type=range]{width:100%;accent-color:#8deaff;margin:6px 0 2px}
+.hint{font-size:11px;color:var(--muted);margin:0 0 4px}
+.btns{display:flex;gap:7px;margin-top:11px}
+.btn{border:1px solid #ffffff22;background:#ffffff0d;color:var(--text);padding:8px 10px;border-radius:9px;cursor:pointer;flex:1;font:inherit;font-size:12.5px}
+.btn:hover{filter:brightness(1.2)}
+.note{grid-column:1/-1;color:#8b97ab;font-size:11.5px;padding:0 4px}
+@media(max-width:900px){.shell{grid-template-columns:1fr;padding:12px}.head,.note{grid-column:1}.stage{height:56vh;min-height:320px}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="head">
+    <div><h1>全屏彩蛋动效 · 与插件同源</h1>
+    <p>本页与插件共用同一套坐标、尺寸与时间公式：112 设计网格 → 256 逻辑画布 → 屏幕。插件在触发时随机选中一个方案，并一直循环播放它，直到用户点击鼠标。</p></div>
+  </header>
+  <main>
+    <div class="stage"><div class="wall"></div><div class="tag"><b>全屏预览</b> · 透明区域透出桌面</div><canvas id="cv"></canvas></div>
+    <div class="cap"><span><b id="title">1 · 巨型喷发</b>　<span id="desc"></span></span><span id="state">循环中</span></div>
+  </main>
+  <aside class="panel">
+    <h2>效果方案（触发时随机选一个）</h2>
+    <div class="choices" id="choices"></div>
+    <div class="hr"></div>
+    <h2>尺寸与密度</h2>
+    <div class="row"><label for="mush">🍄 蘑菇尺寸</label><span class="val" id="mushVal">140%</span></div>
+    <input id="mush" type="range" min="80" max="300" step="5" value="140">
+    <div class="row"><label for="star">✨ 星星尺寸</label><span class="val" id="starVal">230%</span></div>
+    <input id="star" type="range" min="80" max="400" step="5" value="230">
+    <div class="row"><label for="den">粒子密度</label><span class="val" id="denVal">55</span></div>
+    <input id="den" type="range" min="25" max="100" step="5" value="55">
+    <p class="hint">插件使用固定默认值：蘑菇 140%、星星 230%、密度 55。滑块仅用于探索其它取值。</p>
+    <div class="btns"><button class="btn" id="replay">▶ 重播</button><button class="btn" id="pause">Ⅱ 暂停</button></div>
+    <div class="btns"><button class="btn" id="rand">随机播放一种</button></div>
+  </aside>
+  <div class="note">提示：动效为 3.8 秒周期函数，循环衔接处不重置相位；流星雨的蘑菇在屏幕外回绕。</div>
+</div>
+<script>
+'use strict';
+// ---- 与 src/egg_effects.cpp 相同的常量与映射 ----
+const DS=112, S=256, SCALE=S/DS, DUR=3.8, TAU=Math.PI*2;
+const canvas=v=>S/2+(v-DS/2)*SCALE;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function rand01(seed){let a=seed>>>0;return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const BURST=(()=>{const r=rand01(0xB17B00B5),out=[];for(let i=0;i<56;i++)out.push({angle:r()*TAU,speed:28+r()*78,delay:r()*0.85,size:12+r()*18,spin:(r()-0.5)*3});return out})();
+
+const schemes=[
+ {title:'巨型喷发',desc:'中心大蘑菇呼吸，周围蘑菇与星星环绕',dur:DUR},
+ {title:'星球粉碎',desc:'中心巨型蘑菇 + 冲击波 + 碎片星环',dur:DUR},
+ {title:'蘑菇流星雨',desc:'五列超大蘑菇持续下落，星星伴随',dur:DUR},
+ {title:'魔法超新星',desc:'超大蘑菇呼吸，星环持续旋转',dur:DUR},
+ {title:'蘑菇巨浪',desc:'四层蘑菇波浪起伏，双前景大蘑菇',dur:DUR}
+];
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+let selected=0,epoch=performance.now(),paused=false,pausedAt=0;
+let mushF=1.4,starF=2.3,den=55;
+function scaled(base){return Math.max(1,Math.round(base*den/55))}
+function glyph(g,x,y,size,alpha,rot,sy){
+  ctx.save();ctx.globalAlpha=clamp(alpha,0,1);ctx.translate(x,y);ctx.rotate(rot||0);ctx.scale(1,sy||1);
+  ctx.font=size+'px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.shadowColor=g==='🍄'?'#ffcb70':'#b5f4ff';ctx.shadowBlur=size*0.22;
+  ctx.fillText(g,0,0);ctx.restore();
+}
+function glow(x,y,r,a){const g=ctx.createRadialGradient(x,y,0,x,y,r);g.addColorStop(0,'rgba(255,214,122,'+clamp(a,0,1)*0.55+')');g.addColorStop(.45,'rgba(255,214,122,'+clamp(a,0,1)*0.18+')');g.addColorStop(1,'rgba(255,214,122,0)');ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,r,0,TAU);ctx.fill()}
+function ring(x,y,r,a,lw){ctx.save();ctx.globalAlpha=clamp(a,0,1);ctx.strokeStyle='#ffd67a';ctx.lineWidth=Math.max(0.5,lw);ctx.shadowColor='#ffd67a';ctx.shadowBlur=14;ctx.beginPath();ctx.arc(x,y,Math.max(1,r),0,TAU);ctx.stroke();ctx.restore()}
+// 每个方案返回 {em:[glyph,x,y,size,alpha,rot,sy], rings:[x,y,r,a,lw], glows:[x,y,r,a]}
+function build(id,t){
+  const p=t/DUR*TAU,em=[],rings=[],glows=[];
+  // Same conversion as the plugin: the 112-unit design grid maps to the
+  // 256-unit canvas, and the canvas maps onto the display.
+  const mush=(x,y,s,a,r,sy)=>em.push(['🍄',canvas(x),canvas(y),canvas(s)*mushF,a,r,sy]);
+  const star=(x,y,s,a,r)=>em.push(['✨',canvas(x),canvas(y),canvas(s)*starF,a,r,1]);
+  const gring=(x,y,r,a,lw)=>rings.push([canvas(x),canvas(y),canvas(r),a,lw]);
+  const gglow=(x,y,r,a)=>glows.push([canvas(x),canvas(y),canvas(r),a]);
+  if(id===0){
+    gglow(56,56,58+10*Math.sin(p),0.34);
+    for(let k=0;k<4;k++){const q=p+k*Math.PI/2;gring(56,56,58+25*Math.sin(q),0.42+0.23*Math.sin(q+0.7),3+k)}
+    mush(56,56,24*(0.94+0.10*Math.sin(p)),1,Math.sin(p)*0.06);
+    const n=scaled(56);
+    for(let i=0;i<n;i++){const s=BURST[i%56],q=p+s.delay*TAU,r=23+27*(0.5+0.5*Math.sin(q));
+      const x=56+Math.cos(s.angle+0.10*Math.sin(p))*r,y=56+Math.sin(s.angle+0.10*Math.sin(p))*r;
+      if(i%3===0)mush(x,y,10,0.62+0.32*Math.sin(q),s.spin*Math.sin(p)*0.5);else star(x,y,6+(i%3)*1,0.62+0.32*Math.sin(q),s.spin*Math.sin(p)*0.5);}
+  } else if(id===1){
+    const pulse=0.91+0.09*Math.sin(p*2);
+    gglow(56,57,46+16*Math.sin(p),0.38);
+    for(let k=0;k<6;k++){const q=p+k*(TAU/6);gring(56,57,24+72*(0.5+0.5*Math.sin(q)),0.48+0.27*Math.sin(q),3+(k%3)*1.8)}
+    mush(56,57,26*pulse,1,Math.sin(p)*0.04);
+    const n=scaled(54);
+    for(let i=0;i<n;i++){const a=i*2.399963229728653+p,r=31+18*Math.sin(p+i*0.37);
+      const x=56+Math.cos(a)*r,y=56+Math.sin(a)*r;
+      if(i%4===0)mush(x,y,9,0.68+0.28*Math.sin(p+i),a);else star(x,y,6+(i%2)*1,0.68+0.28*Math.sin(p+i),a);}
+  } else if(id===2){
+    gglow(56,73,62,0.30+0.08*Math.sin(p));
+    const per=Math.max(2,Math.round(5*den/55));
+    for(let lane=0;lane<5;lane++)for(let j=0;j<per;j++){
+      const off=lane*0.31+j*(0.67*5/Math.max(1,per)),q=((t+off)%DUR)/DUR;
+      const x0=9+lane*21+(j%2)*5,y=-32+q*174,x=x0+Math.sin(p+lane+j*0.6)*5;
+      const bob=0.92+0.08*Math.sin(p*2+lane+j);
+      mush(x,y,(13+(j%2)*3.5)*bob,0.98,Math.sin(p+j)*0.10);
+      for(const s of [0,1]){const side=s===0?-1:1;
+        star(x+side*(9+5*Math.sin(p+j)),y-19-s*12,5+(s?2:0),0.84+0.14*Math.sin(p+lane+s),side*0.25);}
+    }
+    mush(56,92-Math.abs(Math.sin(p*2))*9,24*(0.95+0.05*Math.sin(p*2)),1,Math.sin(p)*0.05);
+  } else if(id===3){
+    const breathe=0.89+0.11*Math.sin(p*2);
+    gglow(56,56,60+14*Math.sin(p),0.40);
+    for(let k=0;k<5;k++){const q=p+k*(TAU/5);gring(56,56,20+86*(0.5+0.5*Math.sin(q)),0.46+0.25*Math.sin(q),3+(k%2)*2)}
+    mush(56,56,26*breathe,1,Math.sin(p)*0.035);
+    const n=scaled(30);
+    for(let i=0;i<n;i++){const a=i*(TAU/30)+p*(i%2?1:-1),r=43+8*Math.sin(p+i*0.43);
+      star(56+Math.cos(a)*r,56+Math.sin(a)*r,i%5===0?9:6+(i%3)*0.8,0.74+0.24*Math.sin(p*2+i),a);}
+    for(let i=0;i<16;i++){const a=i*(TAU/16)-p*0.5,r=76+6*Math.sin(p*2+i);
+      mush(56+Math.cos(a)*r,56+Math.sin(a)*r,7+(i%3)*1.2,0.80+0.18*Math.sin(p+i),a);}
+  } else {
+    gglow(56,79,66,0.32+0.08*Math.sin(p));
+    const cols=scaled(11);
+    for(let row=0;row<4;row++)for(let i=0;i<cols;i++){
+      const lane=i*0.72+row*0.83,wave=p+lane;
+      const x=4+i*(104/cols)+(row%2)*4.5+3.8*Math.sin(p+lane);
+      const y=53+row*13+22*Math.sin(wave),size=(13+(i%2)*2)*(0.91+0.09*Math.sin(wave));
+      mush(x,y,size,0.90+0.09*Math.sin(p*2+lane),Math.sin(wave)*0.08);
+      if((i+row)%2===0)star(x+4*Math.sin(p*2+lane),y-size*0.72,6+(i%2)*1,0.82+0.16*Math.sin(p*2+lane),wave*0.15);
+    }
+    mush(28,82,22*(0.93+0.07*Math.sin(p)),0.98,Math.sin(p)*0.04);
+    mush(84,82,22*(0.93+0.07*Math.sin(p+Math.PI)),0.98,Math.sin(p+Math.PI)*0.04);
+    for(let i=0;i<6;i++){const q=p+i*(TAU/6);gring(56,95,30+66*(0.5+0.5*Math.sin(q)),0.42+0.22*Math.sin(q),3)}
+  }
+  return {em,rings,glows};
+}
+function render(id,t){
+  const r=cv.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
+  if(cv.width!==Math.round(r.width*dpr)||cv.height!==Math.round(r.height*dpr)){cv.width=Math.round(r.width*dpr);cv.height=Math.round(r.height*dpr)}
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,r.width,r.height);
+  // Same mapping as the plugin: the 256-unit canvas fills the display, while
+  // glyphs and rings use the short-edge scale.
+  const kx=r.width/S,ky=r.height/S,kg=Math.min(r.width,r.height)/S;
+  const f=build(id,t);
+  for(const g of f.glows)glow(g[0]*kx,g[1]*ky,g[2]*kg,g[3]);
+  for(const g of f.rings)ring(g[0]*kx,g[1]*ky,g[2]*kg,g[3],g[4]*kg);
+  for(const e of f.em)glyph(e[0],e[1]*kx,e[2]*ky,e[3]*kg,e[4],e[5],e[6]);
+}
+function loop(now){
+  if(!paused){const t=((now-epoch)/1000)%DUR;render(selected,t);
+    document.getElementById('state').textContent='循环中 · '+(DUR-t).toFixed(1)+'s';}
+  requestAnimationFrame(loop);
+}
+function select(i){selected=(i+schemes.length)%schemes.length;epoch=performance.now();
+  document.getElementById('title').textContent=(selected+1)+' · '+schemes[selected].title;
+  document.getElementById('desc').textContent=schemes[selected].desc;
+  document.querySelectorAll('.choice').forEach((x,n)=>x.classList.toggle('active',n===selected));}
+const host=document.getElementById('choices');
+schemes.forEach((s,i)=>{const b=document.createElement('button');b.className='choice';
+  b.innerHTML='<strong>'+(i+1)+' · '+s.title+'</strong><small>'+s.desc+'</small>';
+  b.onclick=()=>select(i);host.appendChild(b)});
+function bind(id,out,fmt,apply){const el=document.getElementById(id);const fn=()=>{out.textContent=fmt(+el.value);apply(+el.value)};el.addEventListener('input',fn);fn()}
+bind('mush',document.getElementById('mushVal'),v=>v+'%',v=>mushF=v/100);
+bind('star',document.getElementById('starVal'),v=>v+'%',v=>starF=v/100);
+bind('den',document.getElementById('denVal'),v=>''+v,v=>den=v);
+document.getElementById('replay').onclick=()=>{epoch=performance.now()};
+document.getElementById('pause').onclick=e=>{paused=!paused;
+  if(paused){pausedAt=performance.now();e.currentTarget.textContent='▶ 继续'}
+  else{epoch+=performance.now()-pausedAt;e.currentTarget.textContent='Ⅱ 暂停'}};
+document.getElementById('rand').onclick=()=>select(Math.floor(Math.random()*schemes.length));
+select(0);requestAnimationFrame(loop);
+</script>
+</body>
+</html>

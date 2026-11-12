@@ -4,9 +4,12 @@
 //  * The callback does O(µs) work only: read the point, check modifiers,
 //    decide. WMI, DDC and gamma are NEVER called here; actions are handed to
 //    a sink that posts to the worker.
-//  * Only Ctrl+Alt+wheel and Ctrl+Alt+left-click are intercepted; everything
-//    else — injected input, Ctrl-only (the volume plugin's gesture), Alt-only,
-//    Shift/Win combos, plain clicks — passes through untouched.
+//  * Only the configured chord (Ctrl+Alt by default) wheel and left-click are
+//    intercepted; everything else — injected input, Ctrl-only (the volume
+//    plugin's gesture), Alt-only, other combos, plain clicks — passes through
+//    untouched.
+//  * The pointer position travels with the decision, so the worker can act on
+//    the display under it and put the overlay there.
 //  * Partial high-precision wheel deltas are passed through immediately and
 //    accumulated; the brightness changes one step per full notch.
 //  * A recognized left-down remembers that its up must be swallowed too, so
@@ -33,7 +36,10 @@ public:
     MouseHook(const MouseHook&) = delete;
     MouseHook& operator=(const MouseHook&) = delete;
 
-    bool start(Sink sink);
+    bool start(Sink sink, GestureModifiers chord);
+    // Thread-safe: the chord a settings change selected. Applied to the next
+    // event, so the hook never has to be reinstalled.
+    void setChord(GestureModifiers chord);
     void stop();
     bool active() const { return m_running.load(); }
 
@@ -42,12 +48,13 @@ private:
     static LRESULT CALLBACK hookProcStatic(int code, WPARAM wp, LPARAM lp);
     LRESULT hookProc(int code, WPARAM wp, LPARAM lp);
     // Cheap gate before building a GestureEvent.
-    static bool fastGate(const MSLLHOOKSTRUCT* m);
+    bool fastGate(const MSLLHOOKSTRUCT* m) const;
 
     std::thread m_thread;
     std::atomic<bool> m_running { false };
     DWORD m_threadId = 0;
     Sink m_sink;
+    std::atomic<unsigned> m_chordMask { 0 }; // bit0 ctrl, bit1 alt, bit2 shift, bit3 win
 
     // Hook-thread-only state.
     WheelAccumulator m_accum;
@@ -55,3 +62,4 @@ private:
 };
 
 } // namespace br
+

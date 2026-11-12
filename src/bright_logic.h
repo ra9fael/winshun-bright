@@ -18,6 +18,25 @@ namespace br {
 
 constexpr int kWheelDelta = 120; // one standard wheel notch
 
+// ---- rectangles ----------------------------------------------------------------
+
+// A monitor rectangle in virtual-screen pixels. Kept free of windows.h so the
+// placement and targeting rules stay unit-testable.
+struct Rect {
+    int left = 0;
+    int top = 0;
+    int right = 0;
+    int bottom = 0;
+
+    bool empty() const { return right <= left || bottom <= top; }
+    bool contains(int x, int y) const
+    {
+        return !empty() && x >= left && x < right && y >= top && y < bottom;
+    }
+    // Squared distance from the point to the rectangle; 0 inside.
+    long long distanceSquared(int x, int y) const;
+};
+
 // ---- overlay placement ---------------------------------------------------------
 
 // The nine fixed anchors of the manifest, plus "monitor-under-mouse" (the
@@ -33,6 +52,8 @@ enum class OverlayAnchor {
     BottomCenter,
     BottomRight,
     MonitorUnderMouse,
+    // The panel the gesture changed, whatever the pointer does afterwards.
+    TargetMonitor,
 };
 
 // ---- monitors ------------------------------------------------------------------
@@ -49,6 +70,9 @@ struct MonitorInfo {
     int percent = -1; // -1 when unknown
     int vcpMax = 100; // DDC maximum for VCP 0x10
     bool adjustable = false;
+    // Desktop area where the display lives: what lets a gesture act on the
+    // panel under the pointer instead of on every panel.
+    Rect bounds;
 };
 
 // Drops duplicate ids (first wins) and sorts internal panels first, then by
@@ -56,9 +80,39 @@ struct MonitorInfo {
 // every rebuild (startup, WM_DISPLAYCHANGE, hot-plug).
 std::vector<MonitorInfo> normalizeMonitors(std::vector<MonitorInfo> in);
 
+// The display whose rectangle holds the point, else the nearest one (so a
+// gesture near a bezel still lands somewhere sensible). `adjustableOnly`
+// skips the panels a gesture cannot change. Index into `monitors`, or -1.
+int monitorIndexAtPoint(const std::vector<MonitorInfo>& monitors, int x, int y,
+    bool adjustableOnly = true);
+
 // ---- gestures ------------------------------------------------------------------
 
 enum class GestureKind { None, Wheel, Click };
+
+// The mouse-chord the wheel and click gestures react to. The default is the
+// historical Ctrl+Alt; a settings choice can move it out of the volume
+// plugin's Ctrl-only way.
+struct GestureModifiers {
+    bool ctrl = true;
+    bool alt = true;
+    bool shift = false;
+    bool win = false;
+
+    static GestureModifiers ctrlAlt() { return {}; }
+    // Parses "ctrl+alt", "alt+shift", "win+alt", "ctrl+shift+alt"; an empty or
+    // unknown value yields the default.
+    static GestureModifiers parse(const std::string& text);
+    std::string text() const; // "ctrl+alt"
+    // The modifiers actually held now match this chord exactly.
+    bool matches(bool ctrlDown, bool altDown, bool shiftDown, bool winDown) const;
+};
+
+// Which displays a gesture changes.
+enum class GestureTarget {
+    MonitorUnderMouse, // the panel the pointer is on
+    All,
+};
 
 // One low-level mouse event, normalized. Modifiers come from
 // GetAsyncKeyState at hook time; `injected` from LLMHF_INJECTED.
@@ -71,20 +125,28 @@ struct GestureEvent {
     bool wheel = false;
     int wheelDelta = 0; // raw signed delta; only meaningful when wheel
     bool leftDown = false;
+    int x = 0; // pointer position at the event, virtual-screen pixels
+    int y = 0;
+    long long eventTimeMs = 0; // monotonic time captured by the hook thread
 };
 
 struct GestureDecision {
     bool swallow = false;
+    bool stopEgg = false; // physical click notification; never swallows input
     GestureKind kind = GestureKind::None;
     int steps = 0; // signed; valid for Wheel
+    int x = 0;     // where the gesture happened (target picking, overlay)
+    int y = 0;
+    long long eventTimeMs = 0;
 
     static GestureDecision pass() { return {}; }
 };
 
-// Ctrl+Alt+wheel and Ctrl+Alt+left-down are ours; everything else — injected
-// input, Ctrl-only (the volume plugin's gesture), Alt-only, Shift/Win combos,
-// plain clicks — passes through untouched.
-GestureDecision decideGesture(const GestureEvent& e);
+// The chord's wheel and left-down are ours; everything else — injected input,
+// other modifier combinations (Ctrl-only belongs to the volume plugin), plain
+// clicks — passes through untouched. An empty chord means gestures are off.
+GestureDecision decideGesture(const GestureEvent& e, const GestureModifiers& chord = GestureModifiers::ctrlAlt());
+
 
 // High-precision touchpads emit many small deltas (e.g. 8 per pixel); apply
 // one adjustment per full notch and keep the remainder for later.
@@ -106,6 +168,49 @@ private:
 int clampPercent(int v); // clamp to 0..100
 // current + steps * percentPerStep, clamped to 0..100.
 int steppedPercent(int current, int steps, int percentPerStep);
+
+// ---- software dimming ------------------------------------------------------------
+
+// Per mille of black the full-screen layer paints for a simulated brightness,
+// so a panel without WMI/DDC can still look dimmer. 100% is invisible (0), 0%
+// is the cap the user allowed (maxDark, 0..90); the result is 0..255 alpha,
+// which is what SetLayeredWindowAttributes takes.
+int dimAlpha(int percent, int maxDark);
+
+// ---- the night mushroom ----------------------------------------------------------
+
+// Local-time predicate used by older trigger rules and their boundary tests.
+bool isNight(int minutesOfDay);
+
+constexpr int kEggUpCountMs = 4000; // continuous up-scrolling that triggers it
+constexpr int kEggGapMs = 10000; // tolerate touchpad/scroll pauses up to ten seconds
+constexpr int kEggAnimationMs = 1800; // brief mushroom animation
+static_assert(kEggUpCountMs == 4000, "the trigger is four seconds by design");
+
+// Watches upward wheel events on one monitor. Pure state: fed one event at a
+// time, it says when the persistent egg should start.
+class EggTracker {
+public:
+    struct Context {
+        int percent = 0;        // the target panel's brightness
+        int minutesOfDay = 0;   // local time
+        bool night = false;     // isNight(minutesOfDay), computed by the caller
+        bool eggEnabled = true;
+        bool sameMonitor = true; // the pointer stayed on the panel being watched
+    };
+
+    // Returns true once after sustained upward scrolling on one monitor.
+    // A downward step, long pause, monitor change, or disabled setting resets the count.
+    bool feed(int steps, const Context& context, long long nowMs);
+
+    void reset();
+    bool counting() const { return m_startedAt >= 0; }
+    int elapsedMs(long long nowMs) const;
+
+private:
+    long long m_startedAt = -1; // first up-step of the current run
+    long long m_lastUpAt = -1;
+};
 
 // DDC/CI VCP 0x10 values are 0..max, not 0..100. Both directions round and
 // clamp; a non-positive max yields 0.

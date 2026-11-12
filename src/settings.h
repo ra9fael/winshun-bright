@@ -8,9 +8,26 @@
 
 namespace br {
 
+// Which panels get a software dim layer: none, only those the hardware
+// channels cannot drive, or every panel (hardware and layer together).
+enum class SoftwareDim {
+    Off,
+    UnsupportedOnly,
+    Always,
+};
+
 struct Settings {
     int percentPerStep = 5; // 1..10
     bool gestureEnabled = true;
+    GestureModifiers gestureModifiers = GestureModifiers::ctrlAlt();
+    GestureTarget gestureTarget = GestureTarget::MonitorUnderMouse;
+    SoftwareDim softwareBrightness = SoftwareDim::Off;
+    // A remote session cannot reach the physical panels at all, so the layer
+    // is the only working dimmer there; on by default for that reason. Users
+    // who find the layer intrusive over RDP can turn it off.
+    bool remoteDim = true;
+    int softwareMaxDark = 60; // 0..90 percent of black at 0% brightness
+    bool mushroomEgg = true;
     bool showOverlay = true;
     int overlayMs = 600; // 300..3000
     OverlayAnchor overlayAnchor = OverlayAnchor::BottomCenter;
@@ -18,8 +35,28 @@ struct Settings {
     int overlayOffsetY = 0;
     int warmStrength = 0; // 0..100; 0 disables the filter
     bool warmRemember = false;
+    // Register global hotkeys for +step / -step / max (host-registered when
+    // the host offers it, RegisterHotKey otherwise). Empty: none.
+    std::wstring hotkeyUp;
+    std::wstring hotkeyDown;
+    std::wstring hotkeyMax;
+    bool gestureDebug = false;
     bool chinese = true; // host language for overlay / list text; not a user setting
 };
+
+inline std::wstring hotkeyOf(const winshun::Json& value)
+{
+    if (!value.isString())
+        return {};
+    const std::string text = value.toString();
+    const std::wstring wide = winshun::wide(text);
+    return wide;
+}
+
+inline bool effectiveEggEnabled(bool discovered, bool hostEnabled, bool persistedEnabled)
+{
+    return discovered ? persistedEnabled : hostEnabled;
+}
 
 inline Settings parseSettings(const winshun::Json& s)
 {
@@ -37,6 +74,55 @@ inline Settings parseSettings(const winshun::Json& s)
     const winshun::Json& gesture = s["gestureEnabled"];
     if (gesture.isBool())
         out.gestureEnabled = gesture.toBool();
+
+    const winshun::Json& chord = s["gestureModifiers"];
+    if (chord.isString())
+        out.gestureModifiers = GestureModifiers::parse(chord.toString());
+
+    const winshun::Json& target = s["gestureTarget"];
+    if (target.isString()) {
+        const std::string v = target.toString();
+        if (v == "all")
+            out.gestureTarget = GestureTarget::All;
+        else if (v == "monitor-under-mouse" || v == "mouse")
+            out.gestureTarget = GestureTarget::MonitorUnderMouse;
+        else
+            out.gestureTarget = GestureTarget::MonitorUnderMouse;
+    }
+
+    const winshun::Json& debug = s["gestureDebug"];
+    if (debug.isBool())
+        out.gestureDebug = debug.toBool();
+
+    const winshun::Json& soft = s["softwareBrightness"];
+    if (soft.isString()) {
+        const std::string v = soft.toString();
+        if (v == "always")
+            out.softwareBrightness = SoftwareDim::Always;
+        else if (v == "unsupported-only")
+            out.softwareBrightness = SoftwareDim::UnsupportedOnly;
+        else if (v == "off")
+            out.softwareBrightness = SoftwareDim::Off;
+    }
+
+    const winshun::Json& remote = s["remoteDim"];
+    if (remote.isBool())
+        out.remoteDim = remote.toBool();
+
+    const winshun::Json& dark = s["softwareMaxDark"];
+    if (dark.isNumber()) {
+        const double v = dark.toNumber();
+        if (v >= 0 && v <= 90)
+            out.softwareMaxDark = static_cast<int>(v);
+    }
+
+    const winshun::Json& egg = s["mushroomEgg"];
+    if (egg.isBool())
+        out.mushroomEgg = egg.toBool();
+
+    out.hotkeyUp = hotkeyOf(s["hotkeyUp"]);
+    out.hotkeyDown = hotkeyOf(s["hotkeyDown"]);
+    out.hotkeyMax = hotkeyOf(s["hotkeyMax"]);
 
     const winshun::Json& overlay = s["showOverlay"];
     if (overlay.isBool())
@@ -72,6 +158,8 @@ inline Settings parseSettings(const winshun::Json& s)
             out.overlayAnchor = OverlayAnchor::BottomRight;
         else if (v == "monitor-under-mouse" || v == "mouse")
             out.overlayAnchor = OverlayAnchor::MonitorUnderMouse;
+        else if (v == "target-monitor" || v == "target")
+            out.overlayAnchor = OverlayAnchor::TargetMonitor;
         else
             out.overlayAnchor = OverlayAnchor::BottomCenter;
     }

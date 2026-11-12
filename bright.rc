@@ -1,0 +1,35 @@
+#pragma code_page(65001)
+#include <winver.h>
+
+// The exe icon, drawn from Phosphor sun (U+E472) by winshun-plugin-icons.
+// Load the named resource L"IDI_ICON1" and assign it to the window with
+// WM_SETICON (both ICON_BIG and ICON_SMALL), or set the window class icons.
+// Custom caption areas must draw the icon explicitly.
+IDI_ICON1 ICON "app.ico"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 0,9,0,0
+ PRODUCTVERSION 0,9,0,0
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+ FILEFLAGS 0x0L
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404b0"
+        BEGIN
+            VALUE "FileDescription", "屏幕亮度 · Win顺 插件"
+            VALUE "FileVersion", "0.9.0"
+            VALUE "InternalName", "bright"
+            VALUE "OriginalFilename", "bright.exe"
+            VALUE "ProductName", "Win顺 · WinShun"
+            VALUE "ProductVersion", "0.9.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x804, 1200
+    END
+END

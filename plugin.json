@@ -3,10 +3,10 @@
   "manifest": 1,
   "id": "ra9fael.bright",
   "name": {"zh": "屏幕亮度", "en": "Display brightness"},
-  "version": "0.1.0",
+  "version": "0.9.0",
   "description": {
-    "zh": "Ctrl+Alt+滚轮调显示器亮度（内屏 WMI、外屏 DDC/CI），Ctrl+Alt+点击开关暖色滤镜；bright 关键字按显示器逐台调节",
-    "en": "Ctrl+Alt+wheel adjusts monitor brightness (WMI for built-in panels, DDC/CI for external), Ctrl+Alt+click toggles the warm filter; the bright keyword adjusts per monitor"
+    "zh": "Ctrl+Alt+滚轮按鼠标所在屏调亮度（可改修饰键；内屏 WMI、外屏 DDC/CI，都不可用时可用软件遮罩模拟），Ctrl+Alt+点击开关暖色滤镜；bright 关键字按显示器逐台调节",
+    "en": "Ctrl+Alt+wheel adjusts the brightness of the display under the pointer (the chord is configurable; WMI for built-in panels, DDC/CI for external, and a software layer when neither answers), Ctrl+Alt+click toggles the warm filter; the bright keyword adjusts per monitor"
   },
   "author": "ra9fael",
   "homepage": "https://github.com/ra9fael/winshun-bright",
@@ -18,6 +18,7 @@
     "program": "bright.exe",
     "sandbox": "normal",
     "start": "eager",
+    "idleExitSec": 0,
     "timeoutMs": 1500,
     "memoryMB": 256
   },
@@ -26,6 +27,7 @@
       "id": "bright",
       "keyword": ["bright", "亮度"],
       "title": {"zh": "亮度", "en": "Brightness"},
+      "icon": "glyph:U+E706",
       "hint": {"zh": "留空列出显示器；bright 70 全部设为 70%", "en": "empty lists monitors; bright 70 sets all to 70%"},
       "actions": [
         {"id": "up", "title": {"zh": "+10%", "en": "+10%"}, "key": "Enter"},
@@ -45,13 +47,85 @@
       "hint": {"zh": "1–10，默认 5", "en": "1–10, default 5"},
       "default": 5
     },
-    {"key": "gestureEnabled", "type": "bool", "title": {"zh": "启用 Ctrl+Alt+滚轮手势", "en": "Enable Ctrl+Alt+wheel gesture"}, "default": true},
+    {"key": "gestureEnabled", "type": "bool", "title": {"zh": "启用滚轮手势", "en": "Enable the wheel gesture"}, "default": true},
+    {
+      "key": "gestureModifiers",
+      "type": "choice",
+      "title": {"zh": "手势修饰键", "en": "Gesture modifiers"},
+      "hint": {"zh": "与滚轮/左键组合使用；只按 Ctrl 的滚轮留给任务栏音量插件，所以别选成纯 Ctrl 之外再加 Shift 之类不常用的组合", "en": "Held with the wheel or a left click. Ctrl alone belongs to the taskbar volume plugin; avoid unusual chords"},
+      "options": ["ctrl+alt", "alt+shift", "win+alt", "ctrl+shift+alt"],
+      "default": "ctrl+alt"
+    },
+    {
+      "key": "gestureTarget",
+      "type": "choice",
+      "title": {"zh": "手势作用的显示器", "en": "Displays the gesture changes"},
+      "hint": {"zh": "默认只调鼠标所在的那块；选“全部”则一次调所有可调显示器", "en": "The panel under the pointer by default; \"all\" changes every adjustable display at once"},
+      "options": [
+        {"value": "monitor-under-mouse", "title": {"zh": "鼠标所在屏幕", "en": "Display under the pointer"}},
+        {"value": "all", "title": {"zh": "全部显示器", "en": "All displays"}}
+      ],
+      "default": "monitor-under-mouse"
+    },
+    {
+      "key": "hotkeyUp",
+      "type": "hotkey",
+      "title": {"zh": "快捷键：亮度 +", "en": "Hotkey: brightness up"},
+      "hint": {"zh": "点一下再按组合键；留空则不注册。作用于鼠标所在屏幕（或按上一条设置）", "en": "Click, then press the chord; empty registers nothing. Acts on the pointer's display (or per the setting above)"},
+      "default": ""
+    },
+    {
+      "key": "hotkeyDown",
+      "type": "hotkey",
+      "title": {"zh": "快捷键：亮度 −", "en": "Hotkey: brightness down"},
+      "default": ""
+    },
+    {
+      "key": "hotkeyMax",
+      "type": "hotkey",
+      "title": {"zh": "快捷键：亮度 100%", "en": "Hotkey: brightness 100%"},
+      "default": ""
+    },
+    {
+      "key": "softwareBrightness",
+      "type": "choice",
+      "title": {"zh": "软件亮度模拟", "en": "Software brightness simulation"},
+      "hint": {"zh": "显示器走不了 WMI/DDC 时，用半透明遮罩模拟变暗；“总是”会叠加在硬件亮度之上。远程会话由下一项单独控制", "en": "When WMI/DDC cannot drive a panel, a translucent layer simulates dimming; \"always\" stacks it on the hardware brightness. Remote sessions are controlled by the next setting"},
+      "options": [
+        {"value": "off", "title": {"zh": "关闭", "en": "Off"}},
+        {"value": "unsupported-only", "title": {"zh": "仅不支持的显示器", "en": "Unsupported displays only"}},
+        {"value": "always", "title": {"zh": "总是（叠加）", "en": "Always (stacked)"}}
+      ],
+      "default": "off"
+    },
+    {
+      "key": "remoteDim",
+      "type": "bool",
+      "title": {"zh": "远程会话启用软件模拟", "en": "Enable the layer in remote sessions"},
+      "hint": {"zh": "远程桌面里硬件通道全部失效，遮罩是唯一可用的变暗手段，所以默认开启；关闭后远程会话内亮度不可用", "en": "In a remote session the hardware channels all fail and the layer is the only working dimmer, so this defaults to on; off makes brightness unavailable remotely"},
+      "default": true
+    },
+    {
+      "key": "softwareMaxDark",
+      "type": "number",
+      "title": {"zh": "模拟变暗上限", "en": "Simulated darkness cap"},
+      "hint": {"zh": "0–90，默认 60；越大越接近全黑", "en": "0–90, default 60; higher gets closer to black"},
+      "default": 60
+    },
+    {
+      "key": "mushroomEgg",
+      "type": "bool",
+      "title": {"zh": "启用彩蛋", "en": "Enable easter egg"},
+      "hint": {"zh": "首次触发彩蛋后解锁；开启或关闭彩蛋", "en": "Unlocked after the first trigger; turn the easter egg on or off"},
+      "default": true
+    },
     {"key": "showOverlay", "type": "bool", "title": {"zh": "显示浮层", "en": "Show overlay"}, "default": true},
     {"key": "overlayMs", "type": "number", "title": {"zh": "浮层停留", "en": "Overlay linger"}, "hint": {"zh": "毫秒，300–3000，默认 600", "en": "ms, 300–3000, default 600"}, "default": 600},
-    {"key": "overlayAnchor", "type": "choice", "title": {"zh": "浮层九宫格锚点", "en": "Overlay anchor"}, "options": ["center", "bottom-center", "bottom-right", "bottom-left", "top-center", "top-right", "top-left", "left-center", "right-center", "monitor-under-mouse"], "default": "bottom-center"},
+    {"key": "overlayAnchor", "type": "choice", "title": {"zh": "浮层九宫格锚点", "en": "Overlay anchor"}, "options": ["center", "bottom-center", "bottom-right", "bottom-left", "top-center", "top-right", "top-left", "left-center", "right-center", "monitor-under-mouse", "target-monitor"], "default": "bottom-center"},
     {"key": "overlayOffsetX", "type": "number", "title": {"zh": "浮层 X 偏移", "en": "Overlay X offset"}, "default": 0},
     {"key": "overlayOffsetY", "type": "number", "title": {"zh": "浮层 Y 偏移", "en": "Overlay Y offset"}, "default": 0},
     {"key": "warmStrength", "type": "number", "title": {"zh": "暖色滤镜强度", "en": "Warm filter strength"}, "hint": {"zh": "0–100，0 关闭；Ctrl+Alt+点击在开/关间切换", "en": "0–100, 0 disables; Ctrl+Alt+click toggles it"}, "default": 0},
-    {"key": "warmRemember", "type": "bool", "title": {"zh": "记住暖色滤镜状态", "en": "Remember warm filter"}, "default": false}
+    {"key": "warmRemember", "type": "bool", "title": {"zh": "记住暖色滤镜状态", "en": "Remember warm filter"}, "default": false},
+    {"key": "gestureDebug", "type": "bool", "title": {"zh": "记录手势调试日志", "en": "Log gesture diagnostics"}, "hint": {"zh": "写入 plugins.log：钩子安装、判定坐标与逐屏失败原因；排查用", "en": "Writes hook installation, gesture coordinates and per-display failures to plugins.log"}, "default": false}
   ]
 }
